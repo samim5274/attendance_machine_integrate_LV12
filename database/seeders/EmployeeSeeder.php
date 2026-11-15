@@ -1,0 +1,162 @@
+<?php
+
+namespace Database\Seeders;
+
+use App\Models\Employee;
+use Illuminate\Database\Seeder;
+
+class EmployeeSeeder extends Seeder
+{
+    public function run(): void
+    {
+        $employees = [
+            [
+                'employee_id' => 'EMP-1001',
+                'name' => 'Rahim Ahmed',
+                'email' => 'rahim@example.com',
+                'phone' => '+8801711000001',
+                'gender' => 'male',
+                'date_of_birth' => '1995-02-15',
+                'joining_date' => '2023-01-10',
+                'designation' => 'Software Engineer',
+                'department' => 'IT',
+                'salary' => 45000,
+                'address' => 'Uttara, Dhaka',
+                'status' => 'active',
+            ],
+            [
+                'employee_id' => 'EMP-1002',
+                'name' => 'Nusrat Jahan',
+                'email' => 'nusrat@example.com',
+                'phone' => '+8801711000002',
+                'gender' => 'female',
+                'date_of_birth' => '1997-05-20',
+                'joining_date' => '2023-03-15',
+                'designation' => 'HR Executive',
+                'department' => 'HR',
+                'salary' => 35000,
+                'address' => 'Mirpur, Dhaka',
+                'status' => 'active',
+            ],
+            [
+                'employee_id' => 'EMP-1003',
+                'name' => 'Karim Hasan',
+                'email' => 'karim@example.com',
+                'phone' => '+8801711000003',
+                'gender' => 'male',
+                'date_of_birth' => '1994-08-12',
+                'joining_date' => '2022-06-01',
+                'designation' => 'Accountant',
+                'department' => 'Accounts',
+                'salary' => 38000,
+                'address' => 'Dhanmondi, Dhaka',
+                'status' => 'active',
+            ],
+            [
+                'employee_id' => 'EMP-1004',
+                'name' => 'Sadia Islam',
+                'email' => 'sadia@example.com',
+                'phone' => '+8801711000004',
+                'gender' => 'female',
+                'date_of_birth' => '1998-11-25',
+                'joining_date' => '2024-01-05',
+                'designation' => 'Graphic Designer',
+                'department' => 'Creative',
+                'salary' => 32000,
+                'address' => 'Mohammadpur, Dhaka',
+                'status' => 'active',
+            ],
+            [
+                'employee_id' => 'EMP-1005',
+                'name' => 'Tanvir Hossain',
+                'email' => 'tanvir@example.com',
+                'phone' => '+8801711000005',
+                'gender' => 'male',
+                'date_of_birth' => '1993-04-18',
+                'joining_date' => '2021-09-12',
+                'designation' => 'Marketing Manager',
+                'department' => 'Marketing',
+                'salary' => 55000,
+                'address' => 'Banani, Dhaka',
+                'status' => 'active',
+            ],
+            [
+                'employee_id' => 'EMP-1006',
+                'name' => 'Farzana Akter',
+                'email' => 'farzana@example.com',
+                'phone' => '+8801711000006',
+                'gender' => 'female',
+                'date_of_birth' => '1996-07-09',
+                'joining_date' => '2023-07-20',
+                'designation' => 'Customer Support Executive',
+                'department' => 'Support',
+                'salary' => 28000,
+                'address' => 'Bashundhara, Dhaka',
+                'status' => 'active',
+            ],
+            [
+                'employee_id' => 'EMP-1007',
+                'name' => 'Sakib Rahman',
+                'email' => 'sakib@example.com',
+                'phone' => '+8801711000007',
+                'gender' => 'male',
+                'date_of_birth' => '1999-01-30',
+                'joining_date' => '2025-02-01',
+                'designation' => 'Junior Developer',
+                'department' => 'IT',
+                'salary' => 25000,
+                'address' => 'Khilgaon, Dhaka',
+                'status' => 'active',
+            ],
+            [
+                'employee_id' => 'EMP-1008',
+                'name' => 'Mim Akter',
+                'email' => 'mim@example.com',
+                'phone' => '+8801711000008',
+                'gender' => 'female',
+                'date_of_birth' => '1997-09-14',
+                'joining_date' => '2022-11-10',
+                'designation' => 'Sales Executive',
+                'department' => 'Sales',
+                'salary' => 30000,
+                'address' => 'Farmgate, Dhaka',
+                'status' => 'inactive',
+            ],
+            [
+                'employee_id' => 'EMP-1009',
+                'name' => 'Imran Kabir',
+                'email' => 'imran@example.com',
+                'phone' => '+8801711000009',
+                'gender' => 'male',
+                'date_of_birth' => '1992-12-05',
+                'joining_date' => '2020-05-15',
+                'designation' => 'Project Manager',
+                'department' => 'Management',
+                'salary' => 65000,
+                'address' => 'Gulshan, Dhaka',
+                'status' => 'active',
+            ],
+            [
+                'employee_id' => 'EMP-1010',
+                'name' => 'Jannatul Ferdous',
+                'email' => 'jannatul@example.com',
+                'phone' => '+8801711000010',
+                'gender' => 'female',
+                'date_of_birth' => '1995-03-22',
+                'joining_date' => '2024-04-01',
+                'designation' => 'Office Executive',
+                'department' => 'Administration',
+                'salary' => 30000,
+                'address' => 'Uttara, Dhaka',
+                'status' => 'active',
+            ],
+        ];
+
+        foreach ($employees as $employee) {
+            Employee::updateOrCreate(
+                ['employee_id' => $employee['employee_id']],
+                $employee
+            );
+        }
+    }
+}
