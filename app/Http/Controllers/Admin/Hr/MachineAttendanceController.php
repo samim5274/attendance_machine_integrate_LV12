@@ -12,9 +12,9 @@ use Carbon\Carbon;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Http\Request;
-use Inertia\Inertia;
-use Inertia\Response;
+use Illuminate\Contracts\View\View;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
@@ -28,8 +28,8 @@ class MachineAttendanceController extends Controller
     {
     }
 
-    public function index(Request $request): Response
-    {
+    public function index(Request $request): View
+    {   
         $tz = $this->tz();
         $today = now($tz)->toDateString();
 
@@ -58,7 +58,7 @@ class MachineAttendanceController extends Controller
 
         $configured = $this->employees->available();
 
-        return Inertia::render('Admin/Hr/Attendance/MachineAttendance', [
+        return view('admin.hr.attendance.machine', [
             'filters' => $filters,
             'timezone' => $tz,
             'employeeModelOk' => $configured,
@@ -69,7 +69,7 @@ class MachineAttendanceController extends Controller
                 'online' => $d->is_active && $d->isOnline(),
                 'last_seen_human' => $d->last_seen_at?->diffForHumans(),
             ]),
-            'unmappedCount' => AttendancePunch::query()->whereNull('employee_id')->distinct()->count('pin'),
+            'unmappedCount' => AttendancePunch::query()->whereNull('employee_id')->select('attendance_device_id', 'pin')->distinct()->get()->count(),
             'daily' => $filters['tab'] === 'daily' && $configured ? $this->daily($filters) : null,
             'punches' => $filters['tab'] === 'punches' ? $this->punches($filters) : null,
             'unmapped' => $filters['tab'] === 'unmapped' ? $this->unmapped() : null,
@@ -130,25 +130,35 @@ class MachineAttendanceController extends Controller
 
         return back()->with('success', $linked > 0
             ? "{$linked} punch(es) linked to employees. Daily attendance is being recalculated."
-            : 'No matching employee codes found for the unmapped PINs.');
+            : 'No mapping found for the unmapped PINs yet. Add them under PIN Mapping.');
     }
 
     // ---------------------------------------------------------------- daily
 
-    /** Employees (with a PIN) LEFT JOIN their attendance row for $date. */
+    /**
+     * Employees that can punch (active PIN mapping on any device, or the legacy
+     * global PIN column) LEFT JOIN their attendance row for $date.
+     */
     private function dailyQuery(string $date): Builder
     {
         $model = $this->employees->model();
         $table = $model->getTable();
+        $key = "{$table}.{$model->getKeyName()}";
         $pin = $this->employees->pinColumn();
+        $useGlobal = $this->employees->usesGlobalPin();
 
         $query = $this->employees->query()->toBase() // keeps SoftDeletes & other global scopes
-            ->leftJoin('employee_daily_attendances as d', function ($join) use ($table, $model, $date) {
-                $join->on('d.employee_id', '=', "{$table}.{$model->getKeyName()}")
+            ->leftJoin('employee_daily_attendances as d', function ($join) use ($key, $date) {
+                $join->on('d.employee_id', '=', $key)
                     ->where('d.attendance_date', '=', $date);
             })
-            ->whereNotNull("{$table}.{$pin}")
-            ->where("{$table}.{$pin}", '!=', '');
+            ->where(function ($q) use ($table, $key, $pin, $useGlobal) {
+                $q->whereExists(fn ($m) => $m->selectRaw('1')->from('employee_device_mappings as m')
+                    ->whereColumn('m.employee_id', $key)->where('m.is_active', true));
+                if ($useGlobal) {
+                    $q->orWhere(fn ($g) => $g->whereNotNull("{$table}.{$pin}")->where("{$table}.{$pin}", '!=', ''));
+                }
+            });
 
         $this->employees->applyActive($query, "{$table}.");
 
@@ -157,8 +167,15 @@ class MachineAttendanceController extends Controller
 
     private function dailyColumns(string $table, string $key, string $pin, string $name): array
     {
+        $grammar = DB::connection()->getQueryGrammar();
+        $mapped = 'SELECT GROUP_CONCAT(m.device_user_id) FROM employee_device_mappings m WHERE m.employee_id = '
+            .$grammar->wrap("{$table}.{$key}").' AND m.is_active = 1';
+        $pinExpr = $this->employees->usesGlobalPin()
+            ? 'COALESCE(NULLIF('.$grammar->wrap("{$table}.{$pin}").", ''), ({$mapped}))"
+            : "({$mapped})";
+
         return [
-            "{$table}.{$key} as employee_id", "{$table}.{$name} as employee_name", "{$table}.{$pin} as employee_pin",
+            "{$table}.{$key} as employee_id", "{$table}.{$name} as employee_name", DB::raw("{$pinExpr} as employee_pin"),
             'd.id as row_id', 'd.first_in', 'd.last_out', 'd.worked_minutes', 'd.punch_count', 'd.shift_name',
             'd.late_minutes', 'd.status', 'd.source', 'd.remarks',
         ];
@@ -176,7 +193,14 @@ class MachineAttendanceController extends Controller
 
         if ($f['search'] !== '') {
             $s = '%'.$f['search'].'%';
-            $query->where(fn ($q) => $q->where("{$table}.{$name}", 'like', $s)->orWhere("{$table}.{$pin}", 'like', $s));
+            $query->where(function ($q) use ($table, $key, $pin, $name, $s) {
+                $q->where("{$table}.{$name}", 'like', $s)
+                    ->orWhereExists(fn ($m) => $m->selectRaw('1')->from('employee_device_mappings as m2')
+                        ->whereColumn('m2.employee_id', "{$table}.{$key}")->where('m2.device_user_id', 'like', $s));
+                if ($this->employees->usesGlobalPin()) {
+                    $q->orWhere("{$table}.{$pin}", 'like', $s);
+                }
+            });
         }
 
         match ($f['status']) {
@@ -304,21 +328,26 @@ class MachineAttendanceController extends Controller
 
     // ------------------------------------------------------------- unmapped
 
+    /** Unresolved (device, PIN) pairs: punches kept, waiting for a mapping. */
     private function unmapped(): array
     {
         $tz = $this->tz();
-        $names = AttendanceDeviceUser::query()->whereNotNull('name')->pluck('name', 'pin');
+        $names = AttendanceDeviceUser::query()->whereNotNull('name')->get(['attendance_device_id', 'pin', 'name'])
+            ->mapWithKeys(fn ($u) => [$u->attendance_device_id.'|'.$u->pin => $u->name]);
+        $devices = AttendanceDevice::query()->pluck('name', 'id');
 
         return AttendancePunch::query()
             ->whereNull('employee_id')
-            ->groupBy('pin')
-            ->selectRaw('pin, COUNT(*) as punches, MIN(punched_at) as first_seen, MAX(punched_at) as last_seen')
+            ->groupBy('attendance_device_id', 'device_sn', 'pin')
+            ->selectRaw('attendance_device_id, device_sn, pin, COUNT(*) as punches, MIN(punched_at) as first_seen, MAX(punched_at) as last_seen')
             ->orderByDesc('last_seen')
             ->limit(300)
             ->get()
             ->map(fn ($r) => [
                 'pin' => $r->pin,
-                'device_name' => $names[$r->pin] ?? null,
+                'device_id' => $r->attendance_device_id,
+                'device' => $devices[$r->attendance_device_id] ?? $r->device_sn,
+                'device_name' => $names[$r->attendance_device_id.'|'.$r->pin] ?? null,
                 'punches' => (int) $r->punches,
                 'first_seen' => Carbon::parse($r->first_seen, config('app.timezone'))->setTimezone($tz)->format('d M Y, h:i A'),
                 'last_seen' => Carbon::parse($r->last_seen, config('app.timezone'))->setTimezone($tz)->format('d M Y, h:i A'),

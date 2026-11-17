@@ -1,21 +1,22 @@
 <?php
 
-namespace App\Listeners;
+namespace App\Events\Zkteco;
 
-use App\Events\Zkteco\DailyAttendanceUpdated;
-use App\Models\EmployeeAttendance;            // <- your existing model
-use App\Models\EmployeeDailyAttendance;
+use Illuminate\Foundation\Events\Dispatchable;
 
-class CopyMachineAttendance
+/**
+ * Fired after employee_daily_attendances rows were (re)built.
+ * Listen to this if you also want to copy the result into another table
+ * (for example your existing employee_attendances used by EmployeeAttendanceController).
+ */
+class DailyAttendanceUpdated
 {
-    public function handle(DailyAttendanceUpdated $event): void
-    {
-        EmployeeDailyAttendance::where('employee_id', $event->employeeId)
-            ->whereIn('attendance_date', $event->dates)
-            ->get()
-            ->each(fn ($d) => EmployeeAttendance::updateOrCreate(
-                ['employee_id' => $d->employee_id, 'date' => $d->attendance_date],
-                ['in_time' => $d->first_in, 'out_time' => $d->last_out, 'status' => 'present', 'source' => 'device'],
-            ));
+    use Dispatchable;
+
+    /** @param list<string> $dates Y-m-d duty dates */
+    public function __construct(
+        public readonly int $employeeId,
+        public readonly array $dates,
+    ) {
     }
 }

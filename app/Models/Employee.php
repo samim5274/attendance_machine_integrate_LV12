@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Employee extends Model
@@ -11,6 +12,7 @@ class Employee extends Model
 
     protected $fillable = [
         'employee_id',
+        'biometric_id',
         'name',
         'email',
         'phone',
@@ -33,7 +35,8 @@ class Employee extends Model
         ];
     }
 
-    public function deviceMappings()
+    /** PINs this employee uses on the attendance terminals. */
+    public function deviceMappings(): HasMany
     {
         return $this->hasMany(EmployeeDeviceMapping::class);
     }

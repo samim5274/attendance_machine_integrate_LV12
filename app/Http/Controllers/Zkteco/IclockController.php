@@ -53,7 +53,7 @@ class IclockController extends Controller
     {
         $device = $this->device($request);
         $table = strtoupper((string) ($this->q($request, 'table') ?? ''));
-        $stamp = $this->q($request, 'Stamp') ?? $this->q($request, 'stamp');
+        $stamp = $this->stampFor($request, $table);
         $body = (string) $request->getContent();
 
         try {
@@ -88,7 +88,23 @@ class IclockController extends Controller
                         $device->operlog_stamp = mb_substr($stamp, 0, 32);
                         $device->save();
                     }
-                    ZkLog::info($table, ['sn' => $device->serial_number, 'lines' => count($lines), 'users' => $users]);
+                    // types/hash/oplog_* show at a glance whether the device is working
+                    // through old history (hash and dates change every batch) or re-sending
+                    // the same batch (same hash). No line content is logged (may hold templates).
+                    $opTimes = array_values(array_filter(array_map(
+                        fn ($l) => $l['type'] === 'OPLOG' ? ($l['fields'][2] ?? null) : null,
+                        $lines,
+                    )));
+                    ZkLog::info($table, [
+                        'sn' => $device->serial_number,
+                        'lines' => count($lines),
+                        'users' => $users,
+                        'types' => array_count_values(array_map(fn ($l) => $l['type'] !== '' ? $l['type'] : '?', $lines)),
+                        'oplog_from' => $opTimes ? min($opTimes) : null,
+                        'oplog_to' => $opTimes ? max($opTimes) : null,
+                        'stamp' => $stamp,
+                        'hash' => substr(sha1($body), 0, 10),
+                    ]);
 
                     return $this->plain('OK: '.count($lines));
 
@@ -258,6 +274,30 @@ class IclockController extends Controller
     private function device(Request $request): AttendanceDevice
     {
         return $request->attributes->get('zk_device');
+    }
+
+    /**
+     * The stamp parameter is named per table: ATTLOG sends "Stamp", OPERLOG sends
+     * "OpStamp", ATTPHOTO sends "PhotoStamp". Reading only "Stamp" meant the
+     * OPERLOG stamp was never saved, so every handshake answered OpStamp=0 and the
+     * device re-uploaded its whole operation log after each reboot / CHECK.
+     */
+    private function stampFor(Request $request, string $table): ?string
+    {
+        $keys = match ($table) {
+            'OPERLOG' => ['OpStamp', 'Stamp'],
+            'ATTPHOTO' => ['PhotoStamp', 'Stamp'],
+            default => ['Stamp'],
+        };
+
+        foreach ($keys as $key) {
+            $value = $this->q($request, $key);
+            if ($value !== null && $value !== '') {
+                return $value;
+            }
+        }
+
+        return null;
     }
 
     /** Case-insensitive query parameter. */

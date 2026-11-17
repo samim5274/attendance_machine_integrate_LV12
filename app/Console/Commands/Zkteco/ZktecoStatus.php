@@ -22,17 +22,20 @@ class ZktecoStatus extends Command
             return self::SUCCESS;
         }
 
-        $today = now()->startOfDay()->format('Y-m-d H:i:s');
+        // Punches are stored in the app timezone; "today" and display use the device timezone.
+        $tz = (string) config('zkteco.timezone');
+        $today = now($tz)->startOfDay()->setTimezone(config('app.timezone'))->format('Y-m-d H:i:s');
 
         $this->table(
-            ['Name', 'Serial', 'State', 'IP', 'Last seen', 'Last punch', 'Today', 'Users', 'Faces', 'Logs on device'],
+            ['Name', 'Serial', 'State', 'IP', 'Last seen', 'Last handshake', 'Last punch', 'Today', 'Users', 'Faces', 'Logs on device'],
             $devices->map(fn (AttendanceDevice $d) => [
                 $d->name,
                 $d->serial_number,
-                !$d->is_active ? 'DISABLED/PENDING' : ($d->isOnline() ? 'ONLINE' : 'OFFLINE'),
+                strtoupper($d->connectionState()),
                 $d->ip_address ?? '-',
                 $d->last_seen_at?->diffForHumans() ?? 'never',
-                $d->last_punch_at?->format('d M H:i') ?? '-',
+                $d->last_handshake_at?->diffForHumans() ?? 'never',
+                $d->last_punch_at?->setTimezone($tz)->format('d M H:i') ?? '-',
                 AttendancePunch::query()->where('attendance_device_id', $d->id)->where('punched_at', '>=', $today)->count(),
                 $d->user_count ?? '-',
                 $d->face_count ?? '-',
@@ -40,9 +43,9 @@ class ZktecoStatus extends Command
             ])->all(),
         );
 
-        $unmapped = AttendancePunch::query()->whereNull('employee_id')->distinct()->count('pin');
+        $unmapped = AttendancePunch::query()->whereNull('employee_id')->select('attendance_device_id', 'pin')->distinct()->get()->count();
         if ($unmapped > 0) {
-            $this->components->warn("{$unmapped} device PIN(s) are not linked to any employee. Set the employee code, then run: php artisan zkteco:rebuild --relink");
+            $this->components->warn("{$unmapped} device PIN(s) are not linked to any employee. Map them under Admin → PIN Mapping (earlier punches are linked automatically), or run: php artisan zkteco:rebuild --relink");
         }
 
         return self::SUCCESS;

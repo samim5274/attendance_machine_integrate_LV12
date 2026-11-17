@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class AttendanceDevice extends Model
 {
     protected $fillable = [
-        'serial_number', 'name', 'model', 'location', 'ip_address', 'mac_address',
+        'serial_number', 'name', 'model', 'location', 'ip_address', 'mac_address', 'port', 'protocol',
         'firmware_version', 'push_version', 'timezone', 'is_active',
         'attlog_stamp', 'operlog_stamp', 'attphoto_stamp',
         'user_count', 'fp_count', 'face_count', 'attlog_count', 'options',
@@ -18,6 +18,7 @@ class AttendanceDevice extends Model
 
     protected $casts = [
         'is_active' => 'boolean',
+        'port' => 'integer',
         'options' => 'array',
         'user_count' => 'integer',
         'fp_count' => 'integer',
@@ -43,6 +44,11 @@ class AttendanceDevice extends Model
         return $this->hasMany(AttendanceDeviceCommand::class);
     }
 
+    public function mappings(): HasMany
+    {
+        return $this->hasMany(EmployeeDeviceMapping::class);
+    }
+
     public function scopeActive(Builder $query): Builder
     {
         return $query->where('is_active', true);
@@ -54,6 +60,21 @@ class AttendanceDevice extends Model
 
         return $this->last_seen_at !== null
             && $this->last_seen_at->greaterThan(now()->subSeconds($threshold));
+    }
+
+    /**
+     * online   = active and talked to us within the threshold
+     * offline  = active but silent (or never connected)
+     * pending  = unknown terminal that connected by itself and awaits approval
+     * disabled = deliberately switched off by an admin
+     */
+    public function connectionState(): string
+    {
+        if ($this->is_active) {
+            return $this->isOnline() ? 'online' : 'offline';
+        }
+
+        return $this->last_handshake_at === null && !$this->punches()->exists() ? 'pending' : 'disabled';
     }
 
     /** Time zone the device clock runs in. */

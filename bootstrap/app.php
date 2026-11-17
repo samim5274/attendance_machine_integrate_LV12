@@ -1,8 +1,10 @@
 <?php
 
+use App\Http\Middleware\AuthenticateZktecoDevice;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Support\Facades\Route;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -10,12 +12,12 @@ return Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
         then: function () {
-            Route::middleware('zkteco.device')->group(base_path('routes/iclock.php'));
+            Route::middleware(['throttle:zkteco', 'zkteco.device'])->group(base_path('routes/iclock.php'));
         },
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->alias([
-            'zkteco.device' => \App\Http\Middleware\AuthenticateZktecoDevice::class,
+            'zkteco.device' => AuthenticateZktecoDevice::class,
         ]);
         $middleware->validateCsrfTokens(except: [
             'iclock/*',

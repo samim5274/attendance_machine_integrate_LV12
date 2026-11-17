@@ -42,6 +42,18 @@ return [
     // Example: ZKTECO_ALLOWED_IPS=192.168.10.0/24
     'allowed_ips' => array_values(array_filter(array_map('trim', explode(',', (string) env('ZKTECO_ALLOWED_IPS', ''))))),
 
+    // Largest request body accepted from a terminal (KB). Bulk re-uploads are
+    // split into many requests by the device, so a few MB is plenty.
+    'max_body_kb' => (int) env('ZKTECO_MAX_BODY_KB', 4096),
+
+    // Requests per minute per source IP on /iclock/* (a device polls every
+    // ~10 s and uploads in bursts; this only stops floods).
+    'rate_limit_per_minute' => (int) env('ZKTECO_RATE_LIMIT', 600),
+
+    // Who may use the admin pages (Devices, PIN mapping, Machine attendance).
+    // Empty = every logged-in user. Comma separated e-mail addresses otherwise.
+    'admin_emails' => array_values(array_filter(array_map('trim', explode(',', (string) env('ZKTECO_ADMIN_EMAILS', ''))))),
+
     // Address shown on the Devices page as "what to type into the device".
     'server_address_hint' => env('ZKTECO_SERVER_ADDRESS'),
     'server_port_hint' => env('ZKTECO_SERVER_PORT'),
@@ -74,17 +86,22 @@ return [
     ],
 
     /*
-    | How a device user (PIN / "User ID" on the terminal) maps to your
-    | employees. The PIN typed on the device must equal this column exactly.
+    | How a device user (PIN / "User ID" on the terminal) maps to employees.
+    |  1. Per-device mapping (Admin -> PIN Mapping, table employee_device_mappings)
+    |     always wins; an INACTIVE mapping leaves the PIN unresolved.
+    |  2. Legacy fallback: the global pin_column (employees.biometric_id). Turn it
+    |     off with ZKTECO_GLOBAL_PIN_FALLBACK=false to rely on mappings only.
+    | The PIN is never assumed to equal the employee's id or employee code.
     */
     'employee' => [
         'model' => App\Models\Employee::class,
-        'pin_column' => env('ZKTECO_EMPLOYEE_PIN_COLUMN', 'employee_code'),
+        'pin_column' => env('ZKTECO_EMPLOYEE_PIN_COLUMN', 'biometric_id'),
+        'global_pin_fallback' => env('ZKTECO_GLOBAL_PIN_FALLBACK', true),
         'name_column' => env('ZKTECO_EMPLOYEE_NAME_COLUMN', 'name'),
         // Optional: column + value that marks an employee as active, used to
         // build the daily sheet and when pushing users to the device.
-        'active_column' => env('ZKTECO_EMPLOYEE_ACTIVE_COLUMN'),
-        'active_value' => env('ZKTECO_EMPLOYEE_ACTIVE_VALUE', 1),
+        'active_column' => env('ZKTECO_EMPLOYEE_ACTIVE_COLUMN', 'status'),
+        'active_value' => env('ZKTECO_EMPLOYEE_ACTIVE_VALUE', 'active'),
     ],
 
     'attendance' => [
@@ -112,6 +129,11 @@ return [
         ],
         'late_grace_minutes' => 10,
         'match_window_minutes' => 180,
+
+        // Punches outside [earliest_valid_date, now + max_future_minutes] are
+        // treated as a wrong device clock: logged, not stored.
+        'earliest_valid_date' => env('ZKTECO_EARLIEST_VALID_DATE', '2000-01-01'),
+        'max_future_minutes' => (int) env('ZKTECO_MAX_FUTURE_MINUTES', 1440),
     ],
 
     // Queue for the daily-attendance rebuild jobs. Set ZKTECO_QUEUE_CONNECTION=sync

@@ -32,19 +32,28 @@ class AttendanceIngestService
 
         $deviceTz = $device->clockTimezone();
         $appTz = (string) config('app.timezone', 'UTC');
-        $pinMap = $this->employees->map(array_column($records, 'pin'));
         $now = now()->format('Y-m-d H:i:s');
+
+        // Clock sanity: a terminal whose clock was reset (year 2000) or runs far ahead
+        // would otherwise create bogus attendance. Such lines are logged, not stored.
+        $earliest = CarbonImmutable::parse((string) config('zkteco.attendance.earliest_valid_date', '2000-01-01'), $appTz);
+        $latest = CarbonImmutable::now($appTz)->addMinutes((int) config('zkteco.attendance.max_future_minutes', 1440));
+        $invalid = [];
 
         // Build rows keyed by the unique key to drop duplicates inside the batch.
         $rows = [];
         foreach ($records as $r) {
             $at = CarbonImmutable::createFromFormat('Y-m-d H:i:s', $r['time'], $deviceTz)->setTimezone($appTz);
+            if ($at->lt($earliest) || $at->gt($latest)) {
+                $invalid[] = $r['raw'];
+                continue;
+            }
             $punchedAt = $at->format('Y-m-d H:i:s');
             $rows[$r['pin'].'|'.$punchedAt] = [
                 'attendance_device_id' => $device->id,
                 'device_sn' => $device->serial_number,
                 'pin' => $r['pin'],
-                'employee_id' => $pinMap[$r['pin']] ?? null,
+                'employee_id' => null, // resolved below
                 'punched_at' => $punchedAt,
                 'status' => $r['status'],
                 'verify_type' => $r['verify'],
@@ -53,6 +62,24 @@ class AttendanceIngestService
                 'received_at' => $now,
             ];
         }
+
+        if ($invalid !== []) {
+            ZkLog::warning('ATTLOG lines with an impossible timestamp were not stored (check the device clock)', [
+                'sn' => $device->serial_number,
+                'lines' => array_slice($invalid, 0, 20),
+            ]);
+        }
+        if ($rows === []) {
+            return 0;
+        }
+
+        // Fresh lookup per upload: mappings can change between requests (long-lived workers).
+        $this->employees->flush();
+        $pinMap = $this->employees->map(array_unique(array_column($rows, 'pin')), $device->id);
+        foreach ($rows as &$row) {
+            $row['employee_id'] = $pinMap[$row['pin']] ?? null;
+        }
+        unset($row);
 
         $new = $this->withoutExisting($device->serial_number, $rows);
 
@@ -136,23 +163,41 @@ class AttendanceIngestService
     }
 
     /**
-     * Link punches of PINs that were unknown when they arrived (e.g. the
-     * employee code was added later) and rebuild their attendance.
+     * Link punches whose PIN could not be resolved when they arrived (mapping or
+     * biometric_id added later) and rebuild their attendance. Only punches that
+     * are still unresolved are touched; linked punches are never re-assigned.
      *
      * @return int punches linked
      */
-    public function relinkUnmapped(): int
+    public function relinkUnmapped(?int $deviceId = null, ?string $pin = null): int
     {
         $this->employees->flush();
-        $pins = AttendancePunch::query()->whereNull('employee_id')->distinct()->pluck('pin')->all();
-        $map = $this->employees->map($pins);
-        $linked = 0;
 
-        foreach ($map as $pin => $employeeId) {
-            $from = AttendancePunch::query()->where('pin', $pin)->whereNull('employee_id')->min('punched_at');
-            $linked += AttendancePunch::query()->where('pin', $pin)->whereNull('employee_id')->update(['employee_id' => $employeeId]);
-            if ($from) {
-                RebuildDailyAttendance::dispatch($employeeId, (string) $from);
+        $groups = AttendancePunch::query()
+            ->whereNull('employee_id')
+            ->when($deviceId !== null, fn ($q) => $q->where('attendance_device_id', $deviceId))
+            ->when($pin !== null, fn ($q) => $q->where('pin', $pin))
+            ->select('attendance_device_id', 'pin')
+            ->distinct()
+            ->get()
+            ->groupBy(fn ($p) => (string) $p->attendance_device_id);
+
+        $linked = 0;
+        foreach ($groups as $device => $rows) {
+            $device = $device === '' ? null : (int) $device;
+            $map = $this->employees->map($rows->pluck('pin')->all(), $device);
+
+            foreach ($map as $p => $employeeId) {
+                $scope = fn () => AttendancePunch::query()
+                    ->whereNull('employee_id')
+                    ->where('pin', $p)
+                    ->when($device === null, fn ($q) => $q->whereNull('attendance_device_id'), fn ($q) => $q->where('attendance_device_id', $device));
+
+                $from = $scope()->min('punched_at');
+                $linked += $scope()->update(['employee_id' => $employeeId]);
+                if ($from) {
+                    RebuildDailyAttendance::dispatch($employeeId, (string) $from);
+                }
             }
         }
 
