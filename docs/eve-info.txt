@@ -1,0 +1,14 @@
+
+ZKTECO------TIMEZONE="Asia/Dhaka"
+ZKTECO------SERVER------ADDRESS=192.168.10.67
+ZKTECO------SERVER------PORT=8000
+ZKTECO------ALLOWED------IPS=192.168.10.136,192.168.10.67,127.0.0.1
+
+# Employee mapping: device "User ID" == this column on your employees table
+ZKTECO------EMPLOYEE------PIN------COLUMN=biometric------id
+ZKTECO------EMPLOYEE------ACTIVE------COLUMN=status
+ZKTECO------EMPLOYEE------ACTIVE------VALUE=active
+ZKTECO------EMPLOYEE------NAME------COLUMN=name
+
+# Rebuild the daily sheet inline (no queue worker needed). Remove to use your queue + supervisor.
+ZKTECO------QUEUE------CONNECTION=sync

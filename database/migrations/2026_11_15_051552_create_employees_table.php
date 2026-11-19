@@ -13,6 +13,8 @@ return new class extends Migration
             $table->id();
 
             $table->string('employee_id', 30)->unique();
+            $table->string('biometric_id', 32)->nullable()->unique();
+            
             $table->string('name');
             $table->string('email')->unique();
             $table->string('phone', 20)->nullable();

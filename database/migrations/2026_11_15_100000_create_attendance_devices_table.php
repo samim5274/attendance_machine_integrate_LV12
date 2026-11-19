@@ -16,6 +16,8 @@ return new class extends Migration
             $table->string('location', 150)->nullable();
             $table->string('ip_address', 45)->nullable();
             $table->string('mac_address', 32)->nullable();
+            $table->unsignedInteger('port')->nullable();
+            $table->string('protocol', 16)->default('TA_PUSH');
             $table->string('firmware_version', 100)->nullable();
             $table->string('push_version', 32)->nullable();
             $table->string('timezone', 64)->nullable(); // null => config('zkteco.timezone')
